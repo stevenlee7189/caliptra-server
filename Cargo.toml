@@ -1,0 +1,22 @@
+[package]
+name = "caliptra-server"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "caliptra-server"
+path = "src/main.rs"
+
+# ── caliptra-sw dependencies ─────────────────────────────────────────────────
+#
+# In CI / release builds these are fetched directly from the upstream repo at
+# the pinned commit.  For local development, override them via the
+# [patch] table in .cargo/config.toml (see that file for instructions).
+#
+[dependencies]
+caliptra-hw-model  = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "951209a31c4373658f89e4b1211f3a557731c7d9" }
+caliptra-api       = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "951209a31c4373658f89e4b1211f3a557731c7d9" }
+caliptra-emu-bus   = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "951209a31c4373658f89e4b1211f3a557731c7d9" }
+caliptra-emu-types = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "951209a31c4373658f89e4b1211f3a557731c7d9" }
+libc = "0.2"
