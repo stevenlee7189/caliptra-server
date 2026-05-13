@@ -1,3 +1,7 @@
-/.cargo/config.toml
 /target/
-/.codex
+/fw/*.bin
+/fw/vendor_pk_hash.txt
+/primary_flash
+/secondary_flash
+/.agents/
+/.codex/

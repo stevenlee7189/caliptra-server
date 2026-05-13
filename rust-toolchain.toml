@@ -1,6 +1,0 @@
-# Licensed under the Apache-2.0 license
-
-[toolchain]
-channel = "1.85"
-profile = "minimal"
-components = ["rustfmt", "clippy"]
