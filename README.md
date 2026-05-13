@@ -120,16 +120,3 @@ python3 mbox_send.py --mbox-socket /tmp/mcu_mbox.sock fw-version
 python3 mbox_send.py --mbox-socket /tmp/mcu_mbox.sock device-caps
 python3 mbox_send.py --mbox-socket /tmp/mcu_mbox.sock random-generate --length 32
 ```
-
-## Generated Files
-
-The following are generated or local runtime artifacts and should not be
-committed:
-
-- `target/`
-- `fw/*.bin`
-- `fw/vendor_pk_hash.txt`
-- `primary_flash`
-- `secondary_flash`
-- `.agents/`
-- `.codex/`
