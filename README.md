@@ -86,18 +86,29 @@ commands.
 
 ## Run
 
-Example server invocation:
+Example server invocation (full runtime with Caliptra images):
 
 ```bash
 ./target/debug/caliptra-server \
   --mbox-socket /tmp/mcu_mbox.sock \
-  --rom fw/mcu_rom.bin \
-  --firmware fw/mcu_runtime.bin \
-  --caliptra-rom fw/caliptra_rom.bin \
+  --rom            fw/mcu_rom.bin \
+  --firmware       fw/mcu_runtime.bin \
+  --caliptra-rom   fw/caliptra_rom.bin \
   --caliptra-firmware fw/caliptra_fw.bin \
-  --soc-manifest fw/soc_manifest.bin \
+  --soc-manifest   fw/soc_manifest.bin \
   --vendor-pk-hash "$(cat fw/vendor_pk_hash.txt)" \
-  --hw-revision 2.0.0 \
+  --hw-revision    2.0.0 \
+  --rom-offset  0x80000000 --rom-size  0x10000  \
+  --dccm-offset 0x50000000 --dccm-size 0x4000   \
+  --sram-offset 0x40000000 --sram-size 0x80000  \
+  --pic-offset  0x60000000 \
+  --i3c-offset  0x20004000 --i3c-size  0x1000   \
+  --mci-offset  0x21000000 --mci-size  0xe00000 \
+  --mbox-offset 0x30020000 --mbox-size 0x28     \
+  --soc-offset  0x30030000 --soc-size  0x5e0    \
+  --otp-offset  0x70000000 --otp-size  0x140    \
+  --lc-offset   0x70000400 --lc-size   0x8c     \
+  --device-security-state 3 \
   --test-feature test-mcu-mbox-driver \
   --no-stdin-uart
 ```
