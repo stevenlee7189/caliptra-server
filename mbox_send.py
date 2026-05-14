@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-mbox_send.py — Send a MCU Mailbox command to caliptra-server via Unix socket.
+mbox_send.py — Send an MCU Mailbox command to caliptra-server via a Unix socket.
 
-MCU Mailbox 的合法 command 全部是 ASCII 4字元 code。
-每個 request 的 payload 第一個 u32 是 checksum：
+Valid MCU Mailbox commands are all 4-character ASCII codes.
+The first u32 in each request payload is the checksum:
   checksum = -(cmd_id + sum(payload[4:] as u32 words)) mod 2^32
 
-常用 command:
-  0x4D465756 (MFWV) = MC_FIRMWARE_VERSION  — 查詢 firmware 版本
-  0x4D434150 (MCAP) = MC_DEVICE_CAPABILITIES — 查詢設備能力
+Common commands:
+  0x4D465756 (MFWV) = MC_FIRMWARE_VERSION  — query firmware version
+  0x4D434150 (MCAP) = MC_DEVICE_CAPABILITIES — query device capabilities
   0x4D44_4944 (MDID) = MC_DEVICE_ID
   0x4D444E49 (MDIN) = MC_DEVICE_INFO
   0x4D47_4C47 (MGLG) = MC_GET_LOG
@@ -16,27 +16,27 @@ MCU Mailbox 的合法 command 全部是 ASCII 4字元 code。
   0x4D43_5247 (MCRG) = MC_RANDOM_GENERATE
 
 Usage:
-    # 查詢 firmware version (index=0)
+    # Query firmware version (index=0)
     python3 mbox_send.py fw-version
     python3 mbox_send.py fw-version --index 1
 
-    # 查詢 device capabilities
+    # Query device capabilities
     python3 mbox_send.py device-caps
 
-    # 查詢 device ID
+    # Query device ID
     python3 mbox_send.py device-id
 
-    # 取得 log (type=0=debug)
+    # Retrieve logs (type=0=debug)
     python3 mbox_send.py get-log
     python3 mbox_send.py get-log --log-type 1
 
-    # Random generate
+    # Generate random data
     python3 mbox_send.py random-generate --length 32
 
-    # 送自訂 raw command (你負責填 checksum)
+    # Send a custom raw command (checksum must be provided manually)
     python3 mbox_send.py raw --cmd 0x4D465756 --hex CHECKSUM_HEX_DATA
 
-    # 送自訂 command，自動算 checksum
+    # Send a custom command with the checksum calculated automatically
     python3 mbox_send.py raw --cmd 0x4D465756 --data-hex 00000000 --auto-checksum
 """
 
@@ -187,7 +187,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--mbox-socket', default='/tmp/mcu_mbox.sock')
     ap.add_argument('--timeout', type=float, default=120.0,
-                    help='Seconds to wait for response (default: 120)')
+                    help='Seconds to wait for a response (default: 120)')
     sub = ap.add_subparsers(dest='subcmd', required=True)
 
     # fw-version
@@ -228,7 +228,7 @@ def main():
 
     if args.subcmd == 'fw-version':
         cmd_id = COMMANDS["MFWV"]
-        payload = struct.pack('<I', args.index)  # index field after checksum
+        payload = struct.pack('<I', args.index)  # Index field after the checksum
         connect_and_send(args, cmd_id, payload)
 
     elif args.subcmd == 'device-caps':
@@ -258,7 +258,7 @@ def main():
     elif args.subcmd == 'raw':
         cmd_id = int(args.cmd.replace('_', ''), 0)
         if args.raw_hex:
-            # send as-is, no auto-checksum
+            # Send as-is without auto-calculating the checksum
             req = bytes.fromhex(args.raw_hex.replace('_', '').replace(' ', ''))
             cmd_ascii = cmd_id.to_bytes(4, 'big').decode('ascii', errors='?')
             print(f"cmd=0x{cmd_id:08x} ({cmd_ascii})  req({len(req)}B)={req.hex()}")
