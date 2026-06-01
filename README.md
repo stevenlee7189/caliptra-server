@@ -133,3 +133,58 @@ python3 mbox_send.py --mbox-socket /tmp/mcu_mbox.sock fw-version
 python3 mbox_send.py --mbox-socket /tmp/mcu_mbox.sock device-caps
 python3 mbox_send.py --mbox-socket /tmp/mcu_mbox.sock random-generate --length 32
 ```
+
+
+## Test Step in AST1040 QEMU
+``` bash
+
+  # 1. Switch to CSR view — the window register at 0x74c02120 controls whether
+  #    0x74200000 maps to the mailbox CSRs or the SRAM data buffer.
+  mw 74c02120 0x21600000
+
+  # 2. Read the LOCK register. A return value of 0 means the lock was acquired
+  #    successfully; the mailbox is now owned by this SoC agent.
+  md 74200000 1
+
+  # 3. Switch to SRAM view so we can write the request payload into the
+  #    mailbox data buffer.
+  mw 74c02120 0x21400000
+
+  # 4. Write SRAM[0] = request checksum.
+  #    FirmwareVersionReq payload = { chksum (i32), index (u32) }.
+  #    Checksum covers the command ID bytes and all fields after chksum:
+  #      sum("MFWV" bytes) = 0x56+0x57+0x46+0x4D = 0x140
+  #      chksum = -0x140 = 0xFFFFFEC0
+  #    SRAM[1] (index field) is left as 0, requesting CaliptraCore firmware version.
+  mw 74200000 0xfffffec0
+
+  # 5. Switch back to CSR view to write the command registers.
+  mw 74c02120 0x21600000
+
+  # 6. Write the command ID: 0x4D465756 = ASCII "MFWV" = MC_FIRMWARE_VERSION.
+  mw 74200010 0x4d465756
+
+  # 7. Write DLEN = 8: the request payload is 8 bytes
+  #    (4-byte chksum + 4-byte index).
+  mw 74200014 0x00000008
+
+  # 8. Write EXECUTE = 1 to trigger the command. The frontend sets CMD_STATUS
+  #    to BUSY and forwards the request to the Caliptra MCU peer.
+  mw 74200018 0x00000001
+
+  # 9. Read CMD_STATUS to check for completion.
+  #    0 = BUSY, 1 = DATA_READY, 2 = COMPLETE, 3 = CMD_FAILURE.
+  #    Poll until the value is no longer BUSY.
+  md 74200020 1
+
+  # 10. Read DLEN to find out how many bytes the MCU returned in the response.
+  md 74200014 1
+
+  # 11. Switch to SRAM view to read the response payload.
+  mw 74c02120 0x21400000
+
+  # 12. Dump 48 bytes of response data starting from SRAM base.
+  #     FirmwareVersionResp layout: MailboxRespHeaderVarSize (8 bytes) +
+  #     version string (up to 32 bytes), so 48 bytes covers the full response.
+  devmem dump -a 74200000 -s 48
+```
