@@ -117,9 +117,11 @@ QEMU should use the same socket path:
 
 ```bash
 qemu-system-arm \
-  -machine ast1030-evb,mcu-mbox-socket=/tmp/mcu_mbox.sock \
-  -kernel zephyr.elf \
-  -nographic
+    -machine ast1040-evb,cptra-peer=peer0 \
+    -chardev socket,id=cptra0,path=/tmp/mcu_mbox.sock \
+    -device cptra-mbox-peer-extern,id=peer0,chardev=cptra0 \
+    -kernel zephyr.elf \
+    -nographic
 ```
 
 ## Manual Test Client
