@@ -101,6 +101,53 @@ fw/soc_manifest.bin
 fw/vendor_pk_hash.txt
 ```
 
+## AST1040 Flash Boot
+
+`--ast1040-flash <image>` runs real AST1040 firmware instead of the emulator
+platform images. It uses `caliptra-mcu-emulator-ast1040`
+(`caliptra-mcu-sw/platforms/ast1040/emulator`), which wraps the unmodified
+emulator with the AST1040 memory map, IO-die peripherals, SS 2.1 flash boot and
+the A0 I3C / OTP differences. The SS-MCU XIP ROM given as `--rom` boots from the
+flash image and loads Caliptra FW, SoC manifest and MCU runtime from flash.
+
+Inputs:
+
+| Option | Source |
+| --- | --- |
+| `--ast1040-flash`, `--firmware`, `--caliptra-firmware`, `--soc-manifest` | aspeed-mcu-fw-hub `bazel build //ast1040/ast1040a0/evb:image` |
+| `--rom` (SS-MCU XIP ROM) | caliptra-mcu-sw `aspeed-dev-2.1`: `cargo xtask-xip rom-build --platform ast1040 --features aspeed-xip` |
+| `--caliptra-rom` (A0) | caliptra-sw tag `ast1040a0-rom-rc1`: `cargo run --release -p caliptra-builder --bin image -- --rom-with-log caliptra_rom_a0rc1.bin` |
+| `--vendor-pk-hash` | SHA384 of `vendor_pub_key_info` in `caliptra-fw.bin` (manifest bytes 12..1748) |
+
+```bash
+HUB=aspeed-mcu-fw-hub/bazel-bin/ast1040/ast1040a0
+./target/debug/caliptra-server \
+  --mbox-socket /tmp/mcu_mbox.sock \
+  --ast1040-flash  $HUB/evb/ast1040.bin \
+  --rom            caliptra-mcu-rom-ast1040-aspeed-xip,aspeed-xip-<commit>.bin \
+  --firmware       $HUB/ssmcu-runtime.bin \
+  --caliptra-rom   caliptra_rom_a0rc1.bin \
+  --caliptra-firmware $HUB/caliptra-fw.bin \
+  --soc-manifest   $HUB/evb/recovery/ast1040a0-default/ast1040a0-default-auth-manifest.bin \
+  --vendor-pk-hash <hash> \
+  --vendor-pqc-type mldsa \
+  --device-security-state 3 \
+  --test-feature test-mcu-mbox-driver \
+  --no-stdin-uart
+```
+
+Memory map, HW revision and flash boot are set by the AST1040 crate.
+`--firmware` and `--soc-manifest` are required by the emulator arguments but
+unused in flash boot. Start QEMU once the server prints
+`FIRMWARE_MAILBOX_READY observed`. The MFWV smoke test below then returns the
+Caliptra core firmware version from the production MCU runtime (for example
+`2.1.0`, DLEN `0x11`) instead of the emulator mock string.
+
+Debug aids: `--ast1040-trace` logs the first access to each modeled IO-die
+register; `CALIPTRA_SERVER_HEARTBEAT=<steps>` prints MCU / Caliptra PCs
+periodically; `CALIPTRA_SERVER_PC_HISTORY=1` dumps the last Caliptra PCs at exit.
+Caliptra `FW_ERROR_FATAL` / `FW_ERROR_NON_FATAL` changes are always logged.
+
 ## QEMU AST1040 Co-Simulation
 
 Start `caliptra-server` first, then start QEMU with a matching socket path.
