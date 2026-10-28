@@ -9,10 +9,16 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+# aspeed caliptra-mcu-sw names the emulator crate "caliptra-mcu-emulator".
+# test-mcu-mbox-driver is a runtime flag here: launch with
+# `--test-feature test-mcu-mbox-driver` so EXECUTE=1 raises the MCU mailbox IRQ.
 caliptra-mcu-emulator = { path = "../caliptra-mcu-sw/emulator/app" }
-caliptra-emu-bus   = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "294bcacbd34aca6e23ce7b652885e3236f7e7afe" }
-caliptra-emu-cpu   = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "294bcacbd34aca6e23ce7b652885e3236f7e7afe" }
-caliptra-emu-types = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "294bcacbd34aca6e23ce7b652885e3236f7e7afe" }
+caliptra-mcu-emulator-ast1040 = { path = "../caliptra-mcu-sw/platforms/ast1040/emulator" }
+# Must match the caliptra-sw rev pinned by ../caliptra-mcu-sw/Cargo.toml.
+caliptra-emu-bus   = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "b99535ded32492d6c23bbc56f95e787a1e275b59" }
+caliptra-emu-periph = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "b99535ded32492d6c23bbc56f95e787a1e275b59" }
+caliptra-emu-cpu   = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "b99535ded32492d6c23bbc56f95e787a1e275b59" }
+caliptra-emu-types = { git = "https://github.com/chipsalliance/caliptra-sw", rev = "b99535ded32492d6c23bbc56f95e787a1e275b59" }
 
 # Match caliptra-mcu-sw's test profile for emulator performance parity.
 [profile.test]
