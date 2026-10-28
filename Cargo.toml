@@ -26,17 +26,9 @@ inherits = "release"
 opt-level = 3
 lto = "thin"
 
-# Even in dev/debug builds, optimize the emulator and CPU simulation crates
-# so caliptra-server is not 10-30x slower than `cargo xtask runtime`.
-[profile.dev.package.caliptra-mcu-emulator]
-opt-level = 3
-[profile.dev.package.caliptra-emu-cpu]
-opt-level = 3
-[profile.dev.package.caliptra-emu-bus]
-opt-level = 3
-[profile.dev.package.caliptra-emu-periph]
-opt-level = 3
-[profile.dev.package.caliptra-mcu-emulator-periph]
-opt-level = 3
-[profile.dev.package.caliptra-mcu-emulator-caliptra]
+# Even in dev/debug builds, optimize every dependency (emulator, CPU
+# simulation, generated register buses, AST1040 platform model) so
+# caliptra-server is not 10-30x slower than `cargo xtask runtime`; only
+# caliptra-server itself keeps debug codegen.
+[profile.dev.package."*"]
 opt-level = 3

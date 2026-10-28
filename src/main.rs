@@ -75,8 +75,10 @@ struct Args {
 }
 
 // Caliptra firmware reports fatal errors through CPTRA_FW_ERROR_{FATAL,NON_FATAL}
-// and may then end the emulator immediately (TB services exit), so watch the
-// registers every step and log any change as it happens.
+// and may then end the emulator soon after (TB services exit), so watch the
+// registers often and log any change as it happens.
+const CALIPTRA_ERROR_CHECK_INTERVAL: u64 = 64;
+
 struct CaliptraErrorWatch {
     soc: SocToCaliptraBus,
     last: [u32; 2],
@@ -297,9 +299,11 @@ fn run(mut machine: Machine, mbox_rx: Receiver<MboxCommand>) {
             }
         }
 
-        caliptra_errors.check();
         let emu = machine.emu();
         steps += 1;
+        if steps % CALIPTRA_ERROR_CHECK_INTERVAL == 0 {
+            caliptra_errors.check();
+        }
         if heartbeat != 0 && steps % heartbeat == 0 {
             eprintln!(
                 "caliptra-server: step {steps}: MCU pc=0x{:08x} Caliptra pc=0x{:08x}",
