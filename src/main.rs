@@ -60,7 +60,10 @@ const FIRMWARE_MAILBOX_READY_MASK: u32 = 1 << (16 + 9);
 const MBOX_DISPATCH_TIMEOUT_STEPS: u64 = 50_000_000;
 
 #[derive(Parser)]
-#[command(name = "caliptra-server", about = "Caliptra mailbox socket bridge + emulator")]
+#[command(
+    name = "caliptra-server",
+    about = "Caliptra mailbox socket bridge + emulator"
+)]
 struct Args {
     /// Unix socket path for command-level MBOX protocol (mcu-mbox-socket QEMU property).
     #[arg(long, default_value = "")]
@@ -85,12 +88,17 @@ struct CaliptraErrorWatch {
 }
 
 impl CaliptraErrorWatch {
-    const FW_ERROR_REGS: [(&'static str, u32); 2] =
-        [("FW_ERROR_FATAL", 0x3003_0008), ("FW_ERROR_NON_FATAL", 0x3003_000c)];
+    const FW_ERROR_REGS: [(&'static str, u32); 2] = [
+        ("FW_ERROR_FATAL", 0x3003_0008),
+        ("FW_ERROR_NON_FATAL", 0x3003_000c),
+    ];
 
     fn new(emu: &Emulator) -> Self {
         Self {
-            soc: emu.caliptra_cpu.bus.soc_to_caliptra_bus(MailboxRequester::SocUser(1)),
+            soc: emu
+                .caliptra_cpu
+                .bus
+                .soc_to_caliptra_bus(MailboxRequester::SocUser(1)),
             last: [0; 2],
         }
     }
@@ -139,7 +147,10 @@ extern "C" fn dump_caliptra_pcs() {
             .filter(|pc| *pc != 0)
             .map(|pc| format!("{pc:08x}"))
             .collect();
-        eprintln!("caliptra-server: last Caliptra PCs (oldest first):\n{}", pcs.join(" "));
+        eprintln!(
+            "caliptra-server: last Caliptra PCs (oldest first):\n{}",
+            pcs.join(" ")
+        );
     });
 }
 
@@ -154,7 +165,10 @@ fn report_fht_location(emu: &mut Emulator) {
         .filter(|a| emu.caliptra_cpu.bus.read(RvSize::Word, *a) == Ok(FHT_MARKER))
         .map(|a| format!("0x{a:08x}"))
         .collect();
-    eprintln!("caliptra-server: Caliptra at FMC entry; FHT marker found at [{}]", found.join(", "));
+    eprintln!(
+        "caliptra-server: Caliptra at FMC entry; FHT marker found at [{}]",
+        found.join(", ")
+    );
 }
 
 /// The emulator, optionally with AST1040 platform support.
@@ -198,15 +212,25 @@ fn dispatch_to_emulator(machine: &mut Machine, cmd: u32, payload: Vec<u8>) -> Mb
     // Acquire lock by reading LOCK (returns 0 = acquired, 1 = busy).
     let lock_val = bus_read(emu, MBOX_LOCK);
     if lock_val != 0 {
-        eprintln!("caliptra-server: mailbox locked (0x{:08x}), dropping command", lock_val);
-        return MboxResponse { status: 3, data: vec![] }; // CmdFailure
+        eprintln!(
+            "caliptra-server: mailbox locked (0x{:08x}), dropping command",
+            lock_val
+        );
+        return MboxResponse {
+            status: 3,
+            data: vec![],
+        }; // CmdFailure
     }
 
     // Write SRAM payload (word-aligned).
     for (i, chunk) in payload.chunks(4).enumerate() {
         let mut word = [0u8; 4];
         word[..chunk.len()].copy_from_slice(chunk);
-        bus_write(emu, MBOX_SRAM_BASE + (i as u32) * 4, u32::from_le_bytes(word));
+        bus_write(
+            emu,
+            MBOX_SRAM_BASE + (i as u32) * 4,
+            u32::from_le_bytes(word),
+        );
     }
     bus_write(emu, MBOX_DLEN, payload.len() as u32);
     bus_write(emu, MBOX_CMD, cmd);
@@ -222,15 +246,24 @@ fn dispatch_to_emulator(machine: &mut Machine, cmd: u32, payload: Vec<u8>) -> Mb
                 steps, cmd
             );
             bus_write(machine.emu(), MBOX_EXECUTE, 0);
-            return MboxResponse { status: 3, data: vec![] };
+            return MboxResponse {
+                status: 3,
+                data: vec![],
+            };
         }
         steps += 1;
         match machine.step() {
             StepAction::Continue => {}
             other => {
-                eprintln!("caliptra-server: emulator halted ({:?}) while waiting for mbox response", other);
+                eprintln!(
+                    "caliptra-server: emulator halted ({:?}) while waiting for mbox response",
+                    other
+                );
                 bus_write(machine.emu(), MBOX_EXECUTE, 0);
-                return MboxResponse { status: 3, data: vec![] };
+                return MboxResponse {
+                    status: 3,
+                    data: vec![],
+                };
             }
         }
         let emu = machine.emu();
@@ -320,9 +353,7 @@ fn run(mut machine: Machine, mbox_rx: Receiver<MboxCommand>) {
             }
         }
 
-        if !mbox_ready
-            && bus_read(emu, FW_FLOW_STATUS) & FIRMWARE_MAILBOX_READY_MASK != 0
-        {
+        if !mbox_ready && bus_read(emu, FW_FLOW_STATUS) & FIRMWARE_MAILBOX_READY_MASK != 0 {
             println!("caliptra-server: FIRMWARE_MAILBOX_READY observed, accepting commands");
             mbox_ready = true;
         }

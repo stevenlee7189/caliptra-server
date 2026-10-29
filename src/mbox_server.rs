@@ -58,9 +58,8 @@ pub fn start(socket_path: &str) -> Receiver<MboxCommand> {
 
 fn run_listener(path: String, tx: Sender<MboxCommand>) {
     let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path).unwrap_or_else(|e| {
-        panic!("mbox-server: failed to bind {}: {}", path, e)
-    });
+    let listener = UnixListener::bind(&path)
+        .unwrap_or_else(|e| panic!("mbox-server: failed to bind {}: {}", path, e));
     println!("mbox-server: listening on {}", path);
 
     for stream in listener.incoming() {
