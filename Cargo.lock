@@ -468,14 +468,17 @@ dependencies = [
  "caliptra-emu-cpu",
  "caliptra-emu-periph",
  "caliptra-emu-types",
+ "caliptra-image-types",
  "caliptra-mcu-config",
  "caliptra-mcu-config-ast1040",
  "caliptra-mcu-emulator",
  "caliptra-mcu-emulator-registers-generated",
+ "caliptra-mcu-flash-image",
  "caliptra-mcu-registers-generated",
- "clap",
  "semver",
+ "sha2",
  "tempfile",
+ "zerocopy",
 ]
 
 [[package]]
@@ -576,6 +579,13 @@ version = "0.1.0"
 [[package]]
 name = "caliptra-mcu-error"
 version = "0.1.0"
+
+[[package]]
+name = "caliptra-mcu-flash-image"
+version = "0.1.0"
+dependencies = [
+ "zerocopy",
+]
 
 [[package]]
 name = "caliptra-mcu-mbox-common"

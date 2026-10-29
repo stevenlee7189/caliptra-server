@@ -64,22 +64,29 @@ Dispatching a command is synchronous from the QEMU mailbox point of view. While
 one command is being processed, the main loop steps the emulator until the
 mailbox status changes from `BUSY` or until the dispatch timeout is hit.
 
-This server expects the emulator to run with:
+The server always runs the emulator with `--test-feature test-mcu-mbox-driver`,
+which lets `EXECUTE=1` raise the MCU mailbox interrupt, plus
+`--device-security-state 3` and `--no-stdin-uart`.
+
+## Usage
 
 ```text
---test-feature test-mcu-mbox-driver
+caliptra-server [-m emulator|ast1040] [--mbox-socket PATH] [machine options] [-- EMULATOR ARGS]
 ```
 
-That feature lets `EXECUTE=1` raise the MCU mailbox interrupt in this emulator
-setup.
+| Option | Machine | Default |
+| --- | --- | --- |
+| `-m`, `--machine` | | `emulator` |
+| `--mbox-socket` | both | `/tmp/mcu_mbox.sock` |
+| `--fw-dir` | `emulator` | `fw` |
+| `--flash`, `--xip-rom`, `--caliptra-rom` | `ast1040` | required |
+| `--trace` | `ast1040` | off |
+| `--heartbeat N`, `--pc-history` | both | off |
 
-## Build
+Arguments after `--` go to `caliptra-mcu-emulator` and override the ones the
+server derives, e.g. `-- --hw-revision 2.1.0` or `-- --vendor-pk-hash <hash>`.
 
-Build the server:
-
-```bash
-cargo build
-```
+## Emulator Platform
 
 Build firmware images and the server:
 
@@ -87,66 +94,50 @@ Build firmware images and the server:
 ./build-fw.sh
 ```
 
-`build-fw.sh` generates firmware binaries under `fw/` and prints example launch
-commands.
+`build-fw.sh` writes `fw/mcu_rom.bin`, `fw/mcu_runtime.bin`,
+`fw/caliptra_rom.bin`, `fw/caliptra_fw.bin`, `fw/soc_manifest.bin` and
+`fw/vendor_pk_hash.txt`. Run with:
 
-Expected firmware inputs for the QEMU co-simulation flow:
-
-```text
-fw/mcu_rom.bin
-fw/mcu_runtime.bin
-fw/caliptra_rom.bin
-fw/caliptra_fw.bin
-fw/soc_manifest.bin
-fw/vendor_pk_hash.txt
+```bash
+./target/debug/caliptra-server --fw-dir fw
 ```
+
+The emulator memory map (ROM at `0x8000_0000`, MCI at `0x2100_0000`, ...) and
+HW revision 2.0.0 are built in. The images in `fw/` must be built from the same
+caliptra-mcu-sw revision the server links against.
 
 ## AST1040 Flash Boot
 
-`--ast1040-flash <image>` runs real AST1040 firmware instead of the emulator
-platform images. It uses `caliptra-mcu-emulator-ast1040`
-(`caliptra-mcu-sw/platforms/ast1040/emulator`), which wraps the unmodified
-emulator with the AST1040 memory map, IO-die peripherals, SS 2.1 flash boot and
-the A0 I3C / OTP differences. The SS-MCU XIP ROM given as `--rom` boots from the
-flash image and loads Caliptra FW, SoC manifest and MCU runtime from flash.
-
-Inputs:
+`-m ast1040` runs real AST1040 firmware. It uses
+`caliptra-mcu-emulator-ast1040` (`caliptra-mcu-sw/platforms/ast1040/emulator`),
+which wraps the unmodified emulator with the AST1040 memory map, IO-die
+peripherals, SS 2.1 flash boot and the A0 I3C / OTP differences. The SS-MCU XIP
+ROM boots from the flash image and loads Caliptra FW, SoC manifest and MCU
+runtime from flash. The vendor PK hash and PQC key type are read from the
+Caliptra FW manifest in flash.
 
 | Option | Source |
 | --- | --- |
-| `--ast1040-flash`, `--firmware`, `--caliptra-firmware`, `--soc-manifest` | aspeed-mcu-fw-hub `bazel build //ast1040/ast1040a0/evb:image` |
-| `--rom` (SS-MCU XIP ROM) | caliptra-mcu-sw `aspeed-dev-2.1`: `cargo xtask-xip rom-build --platform ast1040 --features aspeed-xip` |
+| `--flash` | aspeed-mcu-fw-hub `bazel build //ast1040/ast1040a0/evb:image` → `bazel-bin/ast1040/ast1040a0/evb/ast1040.bin` |
+| `--xip-rom` | caliptra-mcu-sw `aspeed-dev-2.1`: `cargo xtask-xip rom-build --platform ast1040 --features aspeed-xip` |
 | `--caliptra-rom` (A0) | caliptra-sw tag `ast1040a0-rom-rc1`: `cargo run --release -p caliptra-builder --bin image -- --rom-with-log caliptra_rom_a0rc1.bin` |
-| `--vendor-pk-hash` | SHA384 of `vendor_pub_key_info` in `caliptra-fw.bin` (manifest bytes 12..1748) |
 
 ```bash
-HUB=aspeed-mcu-fw-hub/bazel-bin/ast1040/ast1040a0
-./target/debug/caliptra-server \
-  --mbox-socket /tmp/mcu_mbox.sock \
-  --ast1040-flash  $HUB/evb/ast1040.bin \
-  --rom            caliptra-mcu-rom-ast1040-aspeed-xip,aspeed-xip-<commit>.bin \
-  --firmware       $HUB/ssmcu-runtime.bin \
-  --caliptra-rom   caliptra_rom_a0rc1.bin \
-  --caliptra-firmware $HUB/caliptra-fw.bin \
-  --soc-manifest   $HUB/evb/recovery/ast1040a0-default/ast1040a0-default-auth-manifest.bin \
-  --vendor-pk-hash <hash> \
-  --vendor-pqc-type mldsa \
-  --device-security-state 3 \
-  --test-feature test-mcu-mbox-driver \
-  --no-stdin-uart
+./target/debug/caliptra-server -m ast1040 \
+  --flash        aspeed-mcu-fw-hub/bazel-bin/ast1040/ast1040a0/evb/ast1040.bin \
+  --xip-rom      caliptra-mcu-rom-ast1040-aspeed-xip,aspeed-xip-<commit>.bin \
+  --caliptra-rom caliptra_rom_a0rc1.bin
 ```
 
-Memory map, HW revision and flash boot are set by the AST1040 crate.
-`--firmware` and `--soc-manifest` are required by the emulator arguments but
-unused in flash boot. Start QEMU once the server prints
-`FIRMWARE_MAILBOX_READY observed`. The MFWV smoke test below then returns the
-Caliptra core firmware version from the production MCU runtime (for example
-`2.1.0`, DLEN `0x11`) instead of the emulator mock string.
+Start QEMU once the server prints `FIRMWARE_MAILBOX_READY observed` (about one
+minute). The MFWV smoke test below then returns the Caliptra core firmware
+version from the production MCU runtime (for example `2.1.0`, DLEN `0x11`)
+instead of the emulator mock string.
 
-Debug aids: `--ast1040-trace` logs the first access to each modeled IO-die
-register; `CALIPTRA_SERVER_HEARTBEAT=<steps>` prints MCU / Caliptra PCs
-periodically; `CALIPTRA_SERVER_PC_HISTORY=1` dumps the last Caliptra PCs at exit.
-Caliptra `FW_ERROR_FATAL` / `FW_ERROR_NON_FATAL` changes are always logged.
+Debug aids: `--trace` logs the first access to each modeled IO-die register;
+`--heartbeat <steps>` prints MCU / Caliptra PCs periodically; `--pc-history`
+dumps the last Caliptra PCs at exit. Caliptra `FW_ERROR_FATAL` /
+`FW_ERROR_NON_FATAL` changes are always logged.
 
 ## QEMU AST1040 Co-Simulation
 
@@ -154,33 +145,14 @@ Start `caliptra-server` first, then start QEMU with a matching socket path.
 
 ### Terminal 1: Start caliptra-server
 
+Use either machine from the sections above, e.g.:
+
 ```bash
-./target/debug/caliptra-server \
-  --mbox-socket /tmp/mcu_mbox.sock \
-  --rom fw/mcu_rom.bin \
-  --firmware fw/mcu_runtime.bin \
-  --caliptra-rom fw/caliptra_rom.bin \
-  --caliptra-firmware fw/caliptra_fw.bin \
-  --soc-manifest fw/soc_manifest.bin \
-  --vendor-pk-hash \
-    b17ca877666657ccd100e6926c7206b60c995cb68992c6c9baefce728af05441dee1ff415adfc187e1e4edb4d3b2d909 \
-  --hw-revision 2.0.0 \
-  --rom-offset 0x80000000 --rom-size 0x10000 \
-  --dccm-offset 0x50000000 --dccm-size 0x4000 \
-  --sram-offset 0x40000000 --sram-size 0x80000 \
-  --pic-offset 0x60000000 \
-  --i3c-offset 0x20004000 --i3c-size 0x1000 \
-  --mci-offset 0x21000000 --mci-size 0xe00000 \
-  --mbox-offset 0x30020000 --mbox-size 0x28 \
-  --soc-offset 0x30030000 --soc-size 0x5e0 \
-  --otp-offset 0x70000000 --otp-size 0x140 \
-  --lc-offset 0x70000400 --lc-size 0x8c \
-  --device-security-state 3 \
-  --test-feature test-mcu-mbox-driver \
-  --no-stdin-uart
+./target/debug/caliptra-server -m ast1040 --flash ... --xip-rom ... --caliptra-rom ...
 ```
 
-The socket path passed to `--mbox-socket` must match QEMU's chardev path.
+The socket path (`--mbox-socket`, default `/tmp/mcu_mbox.sock`) must match
+QEMU's chardev path.
 
 ### Terminal 2: Start QEMU
 

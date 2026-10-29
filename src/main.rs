@@ -2,14 +2,12 @@
 //
 // Bridges QEMU MCU mailbox traffic (via Unix socket) to the caliptra-mcu-sw emulator.
 //
-// Socket mode:
+// Machines (-m):
+//   emulator  caliptra-mcu-sw emulator platform, firmware from --fw-dir
+//   ast1040   AST1040 flash boot (caliptra-mcu-emulator-ast1040)
 //
-//   Command-level MBOX (--mbox-socket):
-//     aspeed-mcu-mbox device sends complete commands via MBOX protocol.
-//     Use with -machine ...,mcu-mbox-socket=<path>
-//
-// Emulator args (--rom, --firmware, --caliptra-rom, --caliptra-firmware,
-// --soc-manifest, …) are forwarded directly to caliptra-mcu-emulator.
+// Arguments after `--` are passed to caliptra-mcu-emulator and override the
+// values derived here, e.g. `-- --hw-revision 2.1.0`.
 //
 // MCU bus mailbox addresses (MCI base = 0x2100_0000):
 //   SRAM     0x2140_0000   (MCI + 0x40_0000)
@@ -26,10 +24,12 @@ use caliptra_emu_cpu::StepAction;
 use caliptra_emu_periph::{MailboxRequester, SocToCaliptraBus};
 use caliptra_emu_types::RvSize;
 use caliptra_mcu_emulator::{Emulator, EmulatorArgs};
-use caliptra_mcu_emulator_ast1040::{Ast1040Args, Ast1040Emulator};
-use clap::Parser;
+use caliptra_mcu_emulator_ast1040::{Ast1040Config, Ast1040Emulator};
+use clap::{CommandFactory, FromArgMatches, Parser, ValueEnum};
 use mbox_server::{MboxCommand, MboxResponse};
 use std::cell::RefCell;
+use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
 // MCU bus-view addresses for MCU Mailbox 0 (within the MCI peripheral).
@@ -59,22 +59,147 @@ const FIRMWARE_MAILBOX_READY_MASK: u32 = 1 << (16 + 9);
 // Prevents an infinite hang if the MCU never sets CMD_STATUS.
 const MBOX_DISPATCH_TIMEOUT_STEPS: u64 = 50_000_000;
 
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum MachineKind {
+    /// caliptra-mcu-sw emulator platform
+    Emulator,
+    /// AST1040 flash boot
+    Ast1040,
+}
+
 #[derive(Parser)]
 #[command(
     name = "caliptra-server",
     about = "Caliptra mailbox socket bridge + emulator"
 )]
 struct Args {
-    /// Unix socket path for command-level MBOX protocol (mcu-mbox-socket QEMU property).
-    #[arg(long, default_value = "")]
+    /// Machine to emulate.
+    #[arg(short, long, value_enum, default_value = "emulator")]
+    machine: MachineKind,
+
+    /// Unix socket path QEMU's cptra-mbox-peer-extern chardev connects to.
+    #[arg(long, default_value = "/tmp/mcu_mbox.sock")]
     mbox_socket: String,
 
-    #[command(flatten)]
-    ast1040: Ast1040Args,
+    /// Directory with mcu_rom.bin, mcu_runtime.bin, caliptra_rom.bin,
+    /// caliptra_fw.bin, soc_manifest.bin and vendor_pk_hash.txt (build-fw.sh).
+    #[arg(long, default_value = "fw", help_heading = "Emulator")]
+    fw_dir: PathBuf,
 
-    // All caliptra-mcu-emulator args are forwarded via flatten.
-    #[command(flatten)]
-    emu: EmulatorArgs,
+    /// Flash image (fw-hub ast1040.bin).
+    #[arg(long, required_if_eq("machine", "ast1040"), help_heading = "AST1040")]
+    flash: Option<PathBuf>,
+
+    /// SS-MCU XIP ROM, placed at the start of the flash image.
+    #[arg(long, required_if_eq("machine", "ast1040"), help_heading = "AST1040")]
+    xip_rom: Option<PathBuf>,
+
+    /// Caliptra core ROM (A0: caliptra-sw tag ast1040a0-rom-rc1).
+    #[arg(long, required_if_eq("machine", "ast1040"), help_heading = "AST1040")]
+    caliptra_rom: Option<PathBuf>,
+
+    /// Log the first access to each modeled IO-die register.
+    #[arg(long, help_heading = "AST1040")]
+    trace: bool,
+
+    /// Print MCU / Caliptra PCs every N steps.
+    #[arg(long, value_name = "N", help_heading = "Debug")]
+    heartbeat: Option<u64>,
+
+    /// Dump the last Caliptra PCs at exit.
+    #[arg(long, help_heading = "Debug")]
+    pc_history: bool,
+
+    /// caliptra-mcu-emulator arguments; override the derived ones.
+    #[arg(last = true, value_name = "EMULATOR ARGS")]
+    emu_args: Vec<OsString>,
+}
+
+// The emulator platform's memory map, as the AST1040 QEMU machine expects it.
+const EMULATOR_MEMORY_MAP: &[(&str, &str)] = &[
+    ("--hw-revision", "2.0.0"),
+    ("--rom-offset", "0x80000000"),
+    ("--rom-size", "0x10000"),
+    ("--dccm-offset", "0x50000000"),
+    ("--dccm-size", "0x4000"),
+    ("--sram-offset", "0x40000000"),
+    ("--sram-size", "0x80000"),
+    ("--pic-offset", "0x60000000"),
+    ("--i3c-offset", "0x20004000"),
+    ("--i3c-size", "0x1000"),
+    ("--mci-offset", "0x21000000"),
+    ("--mci-size", "0xe00000"),
+    ("--mbox-offset", "0x30020000"),
+    ("--mbox-size", "0x28"),
+    ("--soc-offset", "0x30030000"),
+    ("--soc-size", "0x5e0"),
+    ("--otp-offset", "0x70000000"),
+    ("--otp-size", "0x140"),
+    ("--lc-offset", "0x70000400"),
+    ("--lc-size", "0x8c"),
+];
+
+impl Args {
+    /// caliptra-mcu-emulator arguments for the selected machine, followed
+    /// by the user's `--` arguments, which take precedence.
+    fn emulator_args(&self) -> Result<EmulatorArgs, String> {
+        let ast1040_only = [
+            ("--flash", self.flash.is_some()),
+            ("--xip-rom", self.xip_rom.is_some()),
+            ("--caliptra-rom", self.caliptra_rom.is_some()),
+            ("--trace", self.trace),
+        ];
+        if self.machine == MachineKind::Emulator {
+            if let Some((name, _)) = ast1040_only.iter().find(|(_, given)| *given) {
+                return Err(format!("{name} needs -m ast1040"));
+            }
+        }
+        let mut argv: Vec<OsString> = ["caliptra-mcu-emulator", "--no-stdin-uart"]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        let mut arg = |name: &str, value: OsString| argv.extend([name.into(), value]);
+        // Production lifecycle; the mailbox driver feature lets EXECUTE=1
+        // interrupt the MCU (see dispatch_to_emulator).
+        arg("--device-security-state", "3".into());
+        arg("--test-feature", "test-mcu-mbox-driver".into());
+        match self.machine {
+            MachineKind::Emulator => {
+                let fw = |name: &str| self.fw_dir.join(name).into_os_string();
+                arg("--rom", fw("mcu_rom.bin"));
+                arg("--firmware", fw("mcu_runtime.bin"));
+                arg("--caliptra-rom", fw("caliptra_rom.bin"));
+                arg("--caliptra-firmware", fw("caliptra_fw.bin"));
+                arg("--soc-manifest", fw("soc_manifest.bin"));
+                let hash_file = self.fw_dir.join("vendor_pk_hash.txt");
+                let hash = std::fs::read_to_string(&hash_file)
+                    .map_err(|e| format!("{}: {e}", hash_file.display()))?;
+                arg("--vendor-pk-hash", hash.trim().into());
+                for (name, value) in EMULATOR_MEMORY_MAP {
+                    arg(name, value.into());
+                }
+            }
+            MachineKind::Ast1040 => {
+                // Ast1040Emulator loads everything else from flash.
+                let caliptra_rom = self.caliptra_rom.clone().unwrap_or_default();
+                arg("--caliptra-rom", caliptra_rom.into_os_string());
+                for name in [
+                    "--rom",
+                    "--firmware",
+                    "--caliptra-firmware",
+                    "--soc-manifest",
+                ] {
+                    arg(name, "/dev/null".into());
+                }
+            }
+        }
+        argv.extend(self.emu_args.iter().cloned());
+        let matches = EmulatorArgs::command()
+            .args_override_self(true)
+            .try_get_matches_from(argv)
+            .map_err(|e| e.to_string())?;
+        EmulatorArgs::from_arg_matches(&matches).map_err(|e| e.to_string())
+    }
 }
 
 // Caliptra firmware reports fatal errors through CPTRA_FW_ERROR_{FATAL,NON_FATAL}
@@ -173,7 +298,7 @@ fn report_fht_location(emu: &mut Emulator) {
 
 /// The emulator, optionally with AST1040 platform support.
 enum Machine {
-    Emulator(Emulator),
+    Emulator(Box<Emulator>),
     Ast1040(Box<Ast1040Emulator>),
 }
 
@@ -283,15 +408,14 @@ fn dispatch_to_emulator(machine: &mut Machine, cmd: u32, payload: Vec<u8>) -> Mb
         }
     }
 }
-fn run(mut machine: Machine, mbox_rx: Receiver<MboxCommand>) {
+fn run(
+    mut machine: Machine,
+    mbox_rx: Receiver<MboxCommand>,
+    heartbeat: u64,
+    trace_caliptra_pc: bool,
+) {
     let mut caliptra_errors = CaliptraErrorWatch::new(machine.emu());
-    let trace_caliptra_pc = std::env::var_os("CALIPTRA_SERVER_PC_HISTORY").is_some();
     let mut fht_reported = false;
-    // Periodically log where both CPUs are, to locate stalls.
-    let heartbeat: u64 = std::env::var("CALIPTRA_SERVER_HEARTBEAT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
     let mut steps: u64 = 0;
     if trace_caliptra_pc {
         // SAFETY: registers a plain extern "C" fn with libc.
@@ -334,10 +458,10 @@ fn run(mut machine: Machine, mbox_rx: Receiver<MboxCommand>) {
 
         let emu = machine.emu();
         steps += 1;
-        if steps % CALIPTRA_ERROR_CHECK_INTERVAL == 0 {
+        if steps.is_multiple_of(CALIPTRA_ERROR_CHECK_INTERVAL) {
             caliptra_errors.check();
         }
-        if heartbeat != 0 && steps % heartbeat == 0 {
+        if heartbeat != 0 && steps.is_multiple_of(heartbeat) {
             eprintln!(
                 "caliptra-server: step {steps}: MCU pc=0x{:08x} Caliptra pc=0x{:08x}",
                 emu.mcu_cpu.read_pc(),
@@ -362,19 +486,26 @@ fn run(mut machine: Machine, mbox_rx: Receiver<MboxCommand>) {
 
 fn main() {
     let args = Args::parse();
-
-    if args.mbox_socket.is_empty() {
-        eprintln!("caliptra-server: specify --mbox-socket");
-        std::process::exit(1);
-    }
+    let emu_args = args.emulator_args().unwrap_or_else(|e| {
+        eprintln!("caliptra-server: {e}");
+        std::process::exit(2);
+    });
 
     let mbox_rx = mbox_server::start(&args.mbox_socket);
 
     println!("caliptra-server: initializing emulator…");
-    let machine = if args.ast1040.flash.is_some() {
-        Ast1040Emulator::new(args.emu, &args.ast1040).map(|ast| Machine::Ast1040(Box::new(ast)))
-    } else {
-        Emulator::from_args(args.emu, false).map(Machine::Emulator)
+    let machine = match args.machine {
+        MachineKind::Emulator => {
+            Emulator::from_args(emu_args, false).map(|emu| Machine::Emulator(Box::new(emu)))
+        }
+        MachineKind::Ast1040 => {
+            let config = Ast1040Config {
+                flash: args.flash.clone().unwrap_or_default(),
+                xip_rom: args.xip_rom.clone().unwrap_or_default(),
+                trace: args.trace,
+            };
+            Ast1040Emulator::new(emu_args, &config).map(|ast| Machine::Ast1040(Box::new(ast)))
+        }
     }
     .unwrap_or_else(|e| {
         eprintln!("caliptra-server: emulator init failed: {}", e);
@@ -382,5 +513,10 @@ fn main() {
     });
     println!("caliptra-server: emulator ready, entering step loop");
 
-    run(machine, mbox_rx);
+    run(
+        machine,
+        mbox_rx,
+        args.heartbeat.unwrap_or(0),
+        args.pc_history,
+    );
 }
