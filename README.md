@@ -71,12 +71,12 @@ which lets `EXECUTE=1` raise the MCU mailbox interrupt, plus
 ## Usage
 
 ```text
-caliptra-server [-m emulator|ast1040] [--mbox-socket PATH] [machine options] [-- EMULATOR ARGS]
+caliptra-server [-m ast1040|emulator] [--mbox-socket PATH] [machine options] [-- EMULATOR ARGS]
 ```
 
 | Option | Machine | Default |
 | --- | --- | --- |
-| `-m`, `--machine` | | `emulator` |
+| `-m`, `--machine` | | `ast1040` |
 | `--mbox-socket` | both | `/tmp/mcu_mbox.sock` |
 | `--fw-dir` | `emulator` | `fw` |
 | `--flash`, `--xip-rom`, `--caliptra-rom` | `ast1040` | required |
@@ -99,7 +99,7 @@ Build firmware images and the server:
 `fw/vendor_pk_hash.txt`. Run with:
 
 ```bash
-./target/debug/caliptra-server --fw-dir fw
+./target/debug/caliptra-server -m emulator --fw-dir fw
 ```
 
 The emulator memory map (ROM at `0x8000_0000`, MCI at `0x2100_0000`, ...) and
@@ -108,7 +108,7 @@ caliptra-mcu-sw revision the server links against.
 
 ## AST1040 Flash Boot
 
-`-m ast1040` runs real AST1040 firmware. It uses
+`-m ast1040` (the default) runs real AST1040 firmware. It uses
 `caliptra-mcu-emulator-ast1040` (`caliptra-mcu-sw/platforms/ast1040/emulator`),
 which wraps the unmodified emulator with the AST1040 memory map, IO-die
 peripherals, SS 2.1 flash boot and the A0 I3C / OTP differences. The SS-MCU XIP
@@ -123,7 +123,7 @@ Caliptra FW manifest in flash.
 | `--caliptra-rom` (A0) | caliptra-sw tag `ast1040a0-rom-rc1`: `cargo run --release -p caliptra-builder --bin image -- --rom-with-log caliptra_rom_a0rc1.bin` |
 
 ```bash
-./target/debug/caliptra-server -m ast1040 \
+./target/debug/caliptra-server \
   --flash        aspeed-mcu-fw-hub/bazel-bin/ast1040/ast1040a0/evb/ast1040.bin \
   --xip-rom      caliptra-mcu-rom-ast1040-aspeed-xip,aspeed-xip-<commit>.bin \
   --caliptra-rom caliptra_rom_a0rc1.bin
@@ -148,7 +148,7 @@ Start `caliptra-server` first, then start QEMU with a matching socket path.
 Use either machine from the sections above, e.g.:
 
 ```bash
-./target/debug/caliptra-server -m ast1040 --flash ... --xip-rom ... --caliptra-rom ...
+./target/debug/caliptra-server --flash ... --xip-rom ... --caliptra-rom ...
 ```
 
 The socket path (`--mbox-socket`, default `/tmp/mcu_mbox.sock`) must match

@@ -3,8 +3,8 @@
 // Bridges QEMU MCU mailbox traffic (via Unix socket) to the caliptra-mcu-sw emulator.
 //
 // Machines (-m):
+//   ast1040   AST1040 flash boot (caliptra-mcu-emulator-ast1040), default
 //   emulator  caliptra-mcu-sw emulator platform, firmware from --fw-dir
-//   ast1040   AST1040 flash boot (caliptra-mcu-emulator-ast1040)
 //
 // Arguments after `--` are passed to caliptra-mcu-emulator and override the
 // values derived here, e.g. `-- --hw-revision 2.1.0`.
@@ -61,10 +61,10 @@ const MBOX_DISPATCH_TIMEOUT_STEPS: u64 = 50_000_000;
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum MachineKind {
-    /// caliptra-mcu-sw emulator platform
-    Emulator,
     /// AST1040 flash boot
     Ast1040,
+    /// caliptra-mcu-sw emulator platform
+    Emulator,
 }
 
 #[derive(Parser)]
@@ -74,7 +74,7 @@ enum MachineKind {
 )]
 struct Args {
     /// Machine to emulate.
-    #[arg(short, long, value_enum, default_value = "emulator")]
+    #[arg(short, long, value_enum, default_value = "ast1040")]
     machine: MachineKind,
 
     /// Unix socket path QEMU's cptra-mbox-peer-extern chardev connects to.
@@ -87,15 +87,15 @@ struct Args {
     fw_dir: PathBuf,
 
     /// Flash image (fw-hub ast1040.bin).
-    #[arg(long, required_if_eq("machine", "ast1040"), help_heading = "AST1040")]
+    #[arg(long, help_heading = "AST1040")]
     flash: Option<PathBuf>,
 
     /// SS-MCU XIP ROM, placed at the start of the flash image.
-    #[arg(long, required_if_eq("machine", "ast1040"), help_heading = "AST1040")]
+    #[arg(long, help_heading = "AST1040")]
     xip_rom: Option<PathBuf>,
 
     /// Caliptra core ROM (A0: caliptra-sw tag ast1040a0-rom-rc1).
-    #[arg(long, required_if_eq("machine", "ast1040"), help_heading = "AST1040")]
+    #[arg(long, help_heading = "AST1040")]
     caliptra_rom: Option<PathBuf>,
 
     /// Log the first access to each modeled IO-die register.
@@ -149,9 +149,22 @@ impl Args {
             ("--caliptra-rom", self.caliptra_rom.is_some()),
             ("--trace", self.trace),
         ];
-        if self.machine == MachineKind::Emulator {
-            if let Some((name, _)) = ast1040_only.iter().find(|(_, given)| *given) {
-                return Err(format!("{name} needs -m ast1040"));
+        // clap's required_if_eq ignores the default -m, so check here.
+        match self.machine {
+            MachineKind::Ast1040 => {
+                let missing: Vec<&str> = ast1040_only[..3]
+                    .iter()
+                    .filter(|(_, given)| !given)
+                    .map(|(name, _)| *name)
+                    .collect();
+                if !missing.is_empty() {
+                    return Err(format!("-m ast1040 requires {}", missing.join(", ")));
+                }
+            }
+            MachineKind::Emulator => {
+                if let Some((name, _)) = ast1040_only.iter().find(|(_, given)| *given) {
+                    return Err(format!("{name} is not used by -m emulator"));
+                }
             }
         }
         let mut argv: Vec<OsString> = ["caliptra-mcu-emulator", "--no-stdin-uart"]
